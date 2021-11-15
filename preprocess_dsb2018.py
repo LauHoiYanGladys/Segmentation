@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-
+# adopted from https://github.com/4uiiurz1/pytorch-nested-unet/blob/master/preprocess_dsb2018.py
 def main():
     img_size = 96
 
