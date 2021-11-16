@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.utils.data
 
-
+# code adopted from https://github.com/4uiiurz1/pytorch-nested-unet/blob/master/dataset.py
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, img_ids, img_dir, mask_dir, img_ext, mask_ext, num_classes, transform=None):
         """
@@ -33,13 +33,6 @@ class Dataset(torch.utils.data.Dataset):
                 |   ├── 0aab0a.png
                 |   ├── 0b1761.png
                 |   ├── ...
-                |
-                ├── 1
-                |   ├── 0a7e06.png
-                |   ├── 0aab0a.png
-                |   ├── 0b1761.png
-                |   ├── ...
-                ...
         """
         self.img_ids = img_ids
         self.img_dir = img_dir
