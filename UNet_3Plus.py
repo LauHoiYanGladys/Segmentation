@@ -7,7 +7,7 @@ from init_weights import init_weights
 '''
     UNet 3+
 '''
-
+# from https://github.com/ZJUGiveLab/UNet-Version/blob/master/models/UNet_3Plus.py
 class UNet_3Plus(nn.Module):
 
     def __init__(self, in_channels=3, n_classes=1, feature_scale=4, is_deconv=True, is_batchnorm=True):
