@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import init
 
+# from https://github.com/ZJUGiveLab/UNet-Version/blob/master/models/init_weights.py
 def weights_init_normal(m):
     classname = m.__class__.__name__
     #print(classname)

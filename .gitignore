@@ -2,3 +2,5 @@ git.ipynb
 download_dataset.ipynb
 command.ipynb
 Dataset/*
+models/*
+__pycache__/

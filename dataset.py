@@ -5,6 +5,9 @@ import numpy as np
 import torch
 import torch.utils.data
 
+import matplotlib.pyplot as plt
+
+
 # code adopted from https://github.com/4uiiurz1/pytorch-nested-unet/blob/master/dataset.py
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, img_ids, img_dir, mask_dir, img_ext, mask_ext, num_classes, transform=None):
@@ -50,8 +53,8 @@ class Dataset(torch.utils.data.Dataset):
 
         img = cv2.imread(os.path.join(self.img_dir, img_id + self.img_ext))
 
-        # the masks are not separated in 0 and 1 classes in our current case
-        mask = cv2.imread(os.path.join(self.mask_dir, 0,
+        # the masks are not separated in 0 and 1 classe folders in our current case
+        mask = cv2.imread(os.path.join(self.mask_dir, str(0),
                         img_id + self.mask_ext), cv2.IMREAD_GRAYSCALE)
 
         # original code
@@ -68,7 +71,8 @@ class Dataset(torch.utils.data.Dataset):
 
         img = img.astype('float32') / 255
         img = img.transpose(2, 0, 1)
+        #img = np.squeeze(img[:,:,0]) # in dim=2, the three layers are the same, just use the 0th one
         mask = mask.astype('float32') / 255
-        mask = mask.transpose(2, 0, 1)
+        
 
         return img, mask, {'img_id': img_id}

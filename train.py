@@ -15,15 +15,20 @@ from sklearn.model_selection import train_test_split
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 
-import archs
-import losses
+# import archs
+# import losses
 from dataset import Dataset
 from metrics import iou_score
 from utils import AverageMeter, str2bool
 
-ARCH_NAMES = archs.__all__
-LOSS_NAMES = losses.__all__
-LOSS_NAMES.append('BCEWithLogitsLoss')
+import iouLoss
+from model import UNet_3Plus
+
+# ARCH_NAMES = archs.__all__
+# LOSS_NAMES = losses.__all__
+# LOSS_NAMES.append('BCEWithLogitsLoss')
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Code adopted from https://github.com/4uiiurz1/pytorch-nested-unet/blob/master/train.py
 def parse_args():
@@ -37,11 +42,11 @@ def parse_args():
                         metavar='N', help='mini-batch size (default: 16)')
 
     # model
-    parser.add_argument('--arch', '-a', metavar='ARCH', default='NestedUNet',
-                        choices=ARCH_NAMES,
-                        help='model architecture: ' +
-                        ' | '.join(ARCH_NAMES) +
-                        ' (default: NestedUNet)')
+    # parser.add_argument('--arch', '-a', metavar='ARCH', default='NestedUNet',
+    #                     choices=ARCH_NAMES,
+    #                     help='model architecture: ' +
+    #                     ' | '.join(ARCH_NAMES) +
+    #                     ' (default: NestedUNet)')
     parser.add_argument('--deep_supervision', default=False, type=str2bool)
     parser.add_argument('--input_channels', default=3, type=int,
                         help='input channels')
@@ -53,11 +58,11 @@ def parse_args():
                         help='image height')
 
     # loss
-    parser.add_argument('--loss', default='BCEDiceLoss',
-                        choices=LOSS_NAMES,
-                        help='loss: ' +
-                        ' | '.join(LOSS_NAMES) +
-                        ' (default: BCEDiceLoss)')
+    # parser.add_argument('--loss', default='BCEDiceLoss',
+    #                     choices=LOSS_NAMES,
+    #                     help='loss: ' +
+    #                     ' | '.join(LOSS_NAMES) +
+    #                     ' (default: BCEDiceLoss)')
 
     # dataset
     parser.add_argument('--dataset', default='dsb2018_96',
@@ -109,8 +114,8 @@ def train(config, train_loader, model, criterion, optimizer):
 
     pbar = tqdm(total=len(train_loader))
     for input, target, _ in train_loader:
-        input = input.cuda()
-        target = target.cuda()
+        input = input.to(device)
+        target = target.to(device)
 
         # compute output
         if config['deep_supervision']:
@@ -190,10 +195,15 @@ def main():
     config = vars(parse_args())
 
     if config['name'] is None:
-        if config['deep_supervision']:
-            config['name'] = '%s_%s_wDS' % (config['dataset'], config['arch'])
-        else:
-            config['name'] = '%s_%s_woDS' % (config['dataset'], config['arch'])
+      if config['deep_supervision']:
+          config['name'] = '%s_%s_wDS' % (config['dataset'], 'unet3plus')
+      else:
+          config['name'] = '%s_%s_woDS' % (config['dataset'], 'unet3plus')
+      # original code
+        # if config['deep_supervision']:
+        #     config['name'] = '%s_%s_wDS' % (config['dataset'], config['arch'])
+        # else:
+        #     config['name'] = '%s_%s_woDS' % (config['dataset'], config['arch'])
     os.makedirs('models/%s' % config['name'], exist_ok=True)
 
     print('-' * 20)
@@ -205,20 +215,28 @@ def main():
         yaml.dump(config, f)
 
     # define loss function (criterion)
-    if config['loss'] == 'BCEWithLogitsLoss':
-        criterion = nn.BCEWithLogitsLoss().cuda()
-    else:
-        criterion = losses.__dict__[config['loss']]().cuda()
+    # start with something simple (iou loss)
+    criterion = iouLoss.IOU() # from iouLoss.py
+
+    # original code
+    # if config['loss'] == 'BCEWithLogitsLoss':
+    #     criterion = nn.BCEWithLogitsLoss().cuda()
+    # else:
+    #     criterion = losses.__dict__[config['loss']]().cuda()
 
     cudnn.benchmark = True
 
     # create model
-    print("=> creating model %s" % config['arch'])
-    model = archs.__dict__[config['arch']](config['num_classes'],
-                                           config['input_channels'],
-                                           config['deep_supervision'])
+    model = UNet_3Plus()
 
-    model = model.cuda()
+    model = model.to(device)
+    # original code
+    # print("=> creating model %s" % config['arch'])
+    # model = archs.__dict__[config['arch']](config['num_classes'],
+    #                                        config['input_channels'],
+    #                                        config['deep_supervision'])
+
+    # model = model.cuda()
 
     params = filter(lambda p: p.requires_grad, model.parameters())
     if config['optimizer'] == 'Adam':
@@ -244,9 +262,10 @@ def main():
         raise NotImplementedError
 
     # Data loading code
-    img_ids = glob(os.path.join('inputs', config['dataset'], 'images', '*' + config['img_ext']))
+    img_ids = glob(os.path.join('Dataset', config['dataset'], 'images', '*' + config['img_ext']))
+    print('img_ids: ',img_ids)
     img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
-
+    
     train_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.2, random_state=41)
 
     train_transform = Compose([
@@ -268,16 +287,16 @@ def main():
 
     train_dataset = Dataset(
         img_ids=train_img_ids,
-        img_dir=os.path.join('inputs', config['dataset'], 'images'),
-        mask_dir=os.path.join('inputs', config['dataset'], 'masks'),
+        img_dir=os.path.join('Dataset', config['dataset'], 'images'),
+        mask_dir=os.path.join('Dataset', config['dataset'], 'masks'),
         img_ext=config['img_ext'],
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         transform=train_transform)
     val_dataset = Dataset(
         img_ids=val_img_ids,
-        img_dir=os.path.join('inputs', config['dataset'], 'images'),
-        mask_dir=os.path.join('inputs', config['dataset'], 'masks'),
+        img_dir=os.path.join('Dataset', config['dataset'], 'images'),
+        mask_dir=os.path.join('Dataset', config['dataset'], 'masks'),
         img_ext=config['img_ext'],
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
