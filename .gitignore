@@ -4,3 +4,4 @@ command.ipynb
 Dataset/*
 models/*
 __pycache__/
+outs/

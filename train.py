@@ -24,6 +24,8 @@ from utils import AverageMeter, str2bool
 import iouLoss
 from model import UNet_3Plus
 import time
+from PIL import Image
+import numpy as np
 
 # ARCH_NAMES = archs.__all__
 # LOSS_NAMES = losses.__all__
@@ -192,7 +194,7 @@ def validate(config, val_loader, model, criterion):
                         ('iou', avg_meters['iou'].avg)])
 
 
-def test(config, test_loader, model, criterion):
+def test(config, test_loader, model, criterion, image_saving_dir):
     avg_meters = {'loss': AverageMeter(),
                   'iou': AverageMeter()}
 
@@ -201,7 +203,7 @@ def test(config, test_loader, model, criterion):
 
     with torch.no_grad():
         pbar = tqdm(total=len(test_loader))
-        for input, target, _ in test_loader:
+        for batch, (input, target, _) in enumerate(test_loader):
             input = input.to(device)
             target = target.to(device)
 
@@ -221,12 +223,33 @@ def test(config, test_loader, model, criterion):
             avg_meters['loss'].update(loss.item(), input.size(0))
             avg_meters['iou'].update(iou, input.size(0))
 
+            # use model to generate segmentation image results
+      
+            # create the folder for saving output images and psnr result
+            image_save_folder = image_saving_dir
+            if not os.path.exists(image_save_folder):
+              os.makedirs(image_save_folder)
+
+            # print("output.shape: ",output.shape)
+            # print("target.shape: ",target.shape)
+
+            # saves the images and image paths to one same folder if necessary
+            output = Image.fromarray((torch.squeeze(output).cpu().detach().numpy()*255).astype(np.uint8))
+            target = Image.fromarray((torch.squeeze(target).cpu().detach().numpy()*255).astype(np.uint8))
+
+            data_str = os.path.join(image_save_folder,str(batch) +'_'+'result.TIF')
+            label_str = os.path.join(image_save_folder,str(batch) +'_'+ 'original.TIF')
+
+            target.save(label_str, 'TIFF')
+            output.save(data_str, 'TIFF')
+
             postfix = OrderedDict([
                 ('loss', avg_meters['loss'].avg),
                 ('iou', avg_meters['iou'].avg),
             ])
             pbar.set_postfix(postfix)
             pbar.update(1)
+
         pbar.close()
 
     return OrderedDict([('loss', avg_meters['loss'].avg),
@@ -236,6 +259,7 @@ def test(config, test_loader, model, criterion):
 def main():
     run_id = str(int(time.time()))
     config = vars(parse_args())
+    image_saving_dir = os.path.join('outs',run_id)
 
     # if config['name'] is None:
     #   if config['deep_supervision']:
@@ -341,6 +365,7 @@ def main():
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         transform=train_transform)
+
     val_dataset = Dataset(
         img_ids=val_img_ids,
         img_dir=os.path.join('Dataset', config['dataset'], 'images'),
@@ -373,7 +398,7 @@ def main():
         drop_last=False)
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
-        batch_size=config['batch_size'],
+        batch_size=1,
         shuffle=False,
         num_workers=config['num_workers'],
         drop_last=False)
@@ -436,7 +461,7 @@ def main():
         ('test_loss', []),
         ('test_iou', []),
     ])
-    testing_log = test(config, test_loader, model, criterion)
+    testing_log = test(config, test_loader, model, criterion, image_saving_dir)
     test_log['test_loss'].append(testing_log['loss'])
     test_log['test_iou'].append(testing_log['iou'])
 
@@ -444,7 +469,7 @@ def main():
                                  run_id, index=False)
 
     torch.cuda.empty_cache()
-
+    
 
 if __name__ == '__main__':
     main()
