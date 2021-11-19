@@ -132,7 +132,8 @@ def train(config, train_loader, model, criterion, optimizer):
             output = model(input)
             loss = criterion(output, target)
             iou = iou_score(output, target)
-
+        # print("target: ",target)
+        # print("output: ",output)
         # compute gradient and do optimizing step
         optimizer.zero_grad()
         loss.backward()

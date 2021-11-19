@@ -239,7 +239,9 @@ class UNet_3Plus(nn.Module):
             torch.cat((h1_Cat_hd1, hd2_UT_hd1, hd3_UT_hd1, hd4_UT_hd1, hd5_UT_hd1), 1)))) # hd1->320*320*UpChannels
 
         d1 = self.outconv1(hd1)  # d1->320*320*n_classes
-        return torch.sigmoid(d1)
+        out = torch.tensor(torch.sigmoid(d1) > 0.5,dtype=torch.float16, requires_grad=True)
+
+        return out
 
 '''
     UNet 3+ with deep supervision
