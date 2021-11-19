@@ -23,6 +23,7 @@ from utils import AverageMeter, str2bool
 
 import iouLoss
 from model import UNet_3Plus
+import time
 
 # ARCH_NAMES = archs.__all__
 # LOSS_NAMES = losses.__all__
@@ -36,7 +37,7 @@ def parse_args():
 
     parser.add_argument('--name', default=None,
                         help='model name: (default: arch+timestamp)')
-    parser.add_argument('--epochs', default=100, type=int, metavar='N',
+    parser.add_argument('--epochs', default=1, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-b', '--batch_size', default=16, type=int,
                         metavar='N', help='mini-batch size (default: 16)')
@@ -88,7 +89,7 @@ def parse_args():
                         help='nesterov')
 
     # scheduler
-    parser.add_argument('--scheduler', default='CosineAnnealingLR',
+    parser.add_argument('--scheduler', default='ReduceLROnPlateau',
                         choices=['CosineAnnealingLR', 'ReduceLROnPlateau', 'MultiStepLR', 'ConstantLR'])
     parser.add_argument('--min_lr', default=1e-5, type=float,
                         help='minimum learning rate')
@@ -160,8 +161,49 @@ def validate(config, val_loader, model, criterion):
     with torch.no_grad():
         pbar = tqdm(total=len(val_loader))
         for input, target, _ in val_loader:
-            input = input.cuda()
-            target = target.cuda()
+            input = input.to(device)
+            target = target.to(device)
+
+            # compute output
+            if config['deep_supervision']:
+                outputs = model(input)
+                loss = 0
+                for output in outputs:
+                    loss += criterion(output, target)
+                loss /= len(outputs)
+                iou = iou_score(outputs[-1], target)
+            else:
+                output = model(input)
+                loss = criterion(output, target)
+                iou = iou_score(output, target)
+
+            avg_meters['loss'].update(loss.item(), input.size(0))
+            avg_meters['iou'].update(iou, input.size(0))
+
+            postfix = OrderedDict([
+                ('loss', avg_meters['loss'].avg),
+                ('iou', avg_meters['iou'].avg),
+            ])
+            pbar.set_postfix(postfix)
+            pbar.update(1)
+        pbar.close()
+
+    return OrderedDict([('loss', avg_meters['loss'].avg),
+                        ('iou', avg_meters['iou'].avg)])
+
+
+def test(config, test_loader, model, criterion):
+    avg_meters = {'loss': AverageMeter(),
+                  'iou': AverageMeter()}
+
+    # switch to evaluate mode
+    model.eval()
+
+    with torch.no_grad():
+        pbar = tqdm(total=len(test_loader))
+        for input, target, _ in test_loader:
+            input = input.to(device)
+            target = target.to(device)
 
             # compute output
             if config['deep_supervision']:
@@ -192,26 +234,25 @@ def validate(config, val_loader, model, criterion):
 
 
 def main():
+    run_id = str(int(time.time()))
     config = vars(parse_args())
 
-    if config['name'] is None:
-      if config['deep_supervision']:
-          config['name'] = '%s_%s_wDS' % (config['dataset'], 'unet3plus')
-      else:
-          config['name'] = '%s_%s_woDS' % (config['dataset'], 'unet3plus')
-      # original code
-        # if config['deep_supervision']:
-        #     config['name'] = '%s_%s_wDS' % (config['dataset'], config['arch'])
-        # else:
-        #     config['name'] = '%s_%s_woDS' % (config['dataset'], config['arch'])
-    os.makedirs('models/%s' % config['name'], exist_ok=True)
+    # if config['name'] is None:
+    #   if config['deep_supervision']:
+    #       config['name'] = '%s_%s_wDS' % (config['dataset'], 'unet3plus')
+    #   else:
+    #       config['name'] = '%s_%s_woDS' % (config['dataset'], 'unet3plus')
+
+    # os.makedirs('models/%s' % config['name'], exist_ok=True)
+    os.makedirs('models/%s' % run_id)
 
     print('-' * 20)
     for key in config:
         print('%s: %s' % (key, config[key]))
     print('-' * 20)
 
-    with open('models/%s/config.yml' % config['name'], 'w') as f:
+    # with open('models/%s/config.yml' % config['name'], 'w') as f:
+    with open('models/%s/config.yml' % run_id, 'w') as f:
         yaml.dump(config, f)
 
     # define loss function (criterion)
@@ -263,11 +304,13 @@ def main():
 
     # Data loading code
     img_ids = glob(os.path.join('Dataset', config['dataset'], 'images', '*' + config['img_ext']))
-    print('img_ids: ',img_ids)
+    # print('img_ids: ',img_ids)
     img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
     
-    train_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.2, random_state=41)
-
+    # train, val, test in 70%, 15%, 15%
+    temp_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.15, random_state=41)
+    train_img_ids, test_img_ids = train_test_split(temp_img_ids, test_size=0.176, random_state=41)
+    
     train_transform = Compose([
         transforms.RandomRotate90(),
         transforms.Flip(),
@@ -281,6 +324,11 @@ def main():
     ])
 
     val_transform = Compose([
+        transforms.Resize(config['input_h'], config['input_w']),
+        transforms.Normalize(),
+    ])
+
+    test_transform = Compose([
         transforms.Resize(config['input_h'], config['input_w']),
         transforms.Normalize(),
     ])
@@ -302,6 +350,15 @@ def main():
         num_classes=config['num_classes'],
         transform=val_transform)
 
+    test_dataset = Dataset(
+        img_ids=test_img_ids,
+        img_dir=os.path.join('Dataset', config['dataset'], 'images'),
+        mask_dir=os.path.join('Dataset', config['dataset'], 'masks'),
+        img_ext=config['img_ext'],
+        mask_ext=config['mask_ext'],
+        num_classes=config['num_classes'],
+        transform=test_transform)
+
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=config['batch_size'],
@@ -310,6 +367,12 @@ def main():
         drop_last=True)
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
+        batch_size=config['batch_size'],
+        shuffle=False,
+        num_workers=config['num_workers'],
+        drop_last=False)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
         batch_size=config['batch_size'],
         shuffle=False,
         num_workers=config['num_workers'],
@@ -350,13 +413,13 @@ def main():
         log['val_iou'].append(val_log['iou'])
 
         pd.DataFrame(log).to_csv('models/%s/log.csv' %
-                                 config['name'], index=False)
+                                 run_id, index=False)
 
         trigger += 1
 
         if val_log['iou'] > best_iou:
             torch.save(model.state_dict(), 'models/%s/model.pth' %
-                       config['name'])
+                       run_id)
             best_iou = val_log['iou']
             print("=> saved best model")
             trigger = 0
@@ -365,8 +428,22 @@ def main():
         if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
             print("=> early stopping")
             break
-
+        
         torch.cuda.empty_cache()
+
+    # testing
+    test_log = OrderedDict([
+        ('test_loss', []),
+        ('test_iou', []),
+    ])
+    testing_log = test(config, test_loader, model, criterion)
+    test_log['test_loss'].append(testing_log['loss'])
+    test_log['test_iou'].append(testing_log['iou'])
+
+    pd.DataFrame(test_log).to_csv('models/%s/test_log.csv' %
+                                 run_id, index=False)
+
+    torch.cuda.empty_cache()
 
 
 if __name__ == '__main__':
