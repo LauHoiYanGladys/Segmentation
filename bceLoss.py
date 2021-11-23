@@ -16,12 +16,13 @@ class WeightedFocalLoss(nn.Module):
         super(WeightedFocalLoss, self).__init__()
         self.alpha = torch.tensor([alpha, 1-alpha]).to(device)
         self.gamma = gamma
+        # print("self.alpha: ",self.alpha)
 
     def forward(self, inputs, targets):
         BCE_loss = torch.nn.functional.binary_cross_entropy_with_logits(torch.squeeze(inputs), torch.squeeze(targets), reduction='none')
         targets = targets.type(torch.long)
-        # at = self.alpha.gather(0, targets.data.view(-1))
+        #at = self.alpha.gather(0, targets.data.view(-1))
         pt = torch.exp(-BCE_loss)
-        # F_loss = at*(1-pt)**self.gamma * BCE_loss
+        #F_loss = at*(1-pt)**self.gamma * BCE_loss
         F_loss = (1-pt)**self.gamma * BCE_loss
         return F_loss.mean()

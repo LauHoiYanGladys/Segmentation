@@ -291,8 +291,8 @@ def main():
 
     # define loss function (criterion)
     # start with something simple (iou loss)
-    criterion = [iouLoss.IOU().to(device), msssimLoss.MSSSIM().to(device),bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
-    # criterion = [iouLoss.IOU().to(device), bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
+    #criterion = [iouLoss.IOU().to(device), msssimLoss.MSSSIM().to(device),bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
+    criterion = [iouLoss.IOU().to(device), bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
 
     # original code
     # if config['loss'] == 'BCEWithLogitsLoss':
