@@ -24,7 +24,7 @@ from utils import AverageMeter, str2bool
 import iouLoss
 import msssimLoss
 import bceLoss
-from model import UNet_3Plus
+from model import UNet_3Plus, UNet_3Plus_DeepSup
 import time
 from PIL import Image
 import numpy as np
@@ -127,7 +127,8 @@ def train(config, train_loader, model, criterion, optimizer):
             outputs = model(input)
             loss = 0
             for output in outputs:
-                loss += criterion(output, target)
+              for index in range(len(criterion)):
+                loss += criterion[index](output, target)
             loss /= len(outputs)
             iou = iou_score(outputs[-1], target)
         else:
@@ -176,7 +177,8 @@ def validate(config, val_loader, model, criterion):
                 outputs = model(input)
                 loss = 0
                 for output in outputs:
-                    loss += criterion(output, target)
+                  for index in range(len(criterion)):
+                    loss += criterion[index](output, target)
                 loss /= len(outputs)
                 iou = iou_score(outputs[-1], target)
             else:
@@ -219,7 +221,8 @@ def test(config, test_loader, model, criterion, image_saving_dir):
                 outputs = model(input)
                 loss = 0
                 for output in outputs:
-                    loss += criterion(output, target)
+                  for index in range(len(criterion)):
+                    loss += criterion[index](output, target)
                 loss /= len(outputs)
                 iou = iou_score(outputs[-1], target)
             else:
@@ -244,7 +247,11 @@ def test(config, test_loader, model, criterion, image_saving_dir):
             # print("target.shape: ",target.shape)
 
             # saves the images and image paths to one same folder if necessary
-            output = Image.fromarray((torch.squeeze(output).cpu().detach().numpy()*255).astype(np.uint8))
+            if config['deep_supervision']:
+              # outputs[0] is the output from the last decoder layer
+              output = Image.fromarray((torch.squeeze(outputs[0]).cpu().detach().numpy()*255).astype(np.uint8))
+            else:
+              output = Image.fromarray((torch.squeeze(output).cpu().detach().numpy()*255).astype(np.uint8))
             target = Image.fromarray((torch.squeeze(target).cpu().detach().numpy()*255).astype(np.uint8))
 
             data_str = os.path.join(image_save_folder,str(batch) +'_'+'result.TIF')
@@ -303,7 +310,10 @@ def main():
     cudnn.benchmark = True
 
     # create model
-    model = UNet_3Plus()
+    if config['deep_supervision']:
+      model = UNet_3Plus_DeepSup()
+    else:
+      model = UNet_3Plus()
 
     model = model.to(device)
     # original code
@@ -346,6 +356,10 @@ def main():
     temp_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.15, random_state=41)
     train_img_ids, test_img_ids = train_test_split(temp_img_ids, test_size=0.176, random_state=41)
     
+    # print("len(val_img_ids): ",len(val_img_ids))
+    # print("len(train_img_ids): ",len(train_img_ids))
+    # print("len(test_img_ids): ",len(test_img_ids))
+
     train_transform = Compose([
         transforms.RandomRotate90(),
         transforms.Flip(),

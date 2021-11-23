@@ -499,8 +499,14 @@ class UNet_3Plus_DeepSup(nn.Module):
         d2 = self.upscore2(d2) # 128->256
 
         d1 = self.outconv1(hd1) # 256
-        return F.sigmoid(d1), F.sigmoid(d2), F.sigmoid(d3), F.sigmoid(d4), F.sigmoid(d5)
 
+        out_d1 = torch.tensor(torch.sigmoid(d1) > 0.5,dtype=torch.float32, requires_grad=True)
+        out_d2 = torch.tensor(torch.sigmoid(d2) > 0.5,dtype=torch.float32, requires_grad=True)
+        out_d3 = torch.tensor(torch.sigmoid(d3) > 0.5,dtype=torch.float32, requires_grad=True)
+        out_d4 = torch.tensor(torch.sigmoid(d4) > 0.5,dtype=torch.float32, requires_grad=True)
+        out_d5 = torch.tensor(torch.sigmoid(d5) > 0.5,dtype=torch.float32, requires_grad=True)
+
+        return out_d1, out_d2, out_d3, out_d4, out_d5
 '''
     UNet 3+ with deep supervision and class-guided module
 '''

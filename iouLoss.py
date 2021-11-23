@@ -1,7 +1,7 @@
 import torch
 
 def _iou(pred, target, size_average = True):
-
+    # print("pred: ", pred)
     b = pred.shape[0]
     IoU = 0.0
     for i in range(0,b):
