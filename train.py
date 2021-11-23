@@ -22,6 +22,8 @@ from metrics import iou_score
 from utils import AverageMeter, str2bool
 
 import iouLoss
+import msssimLoss
+import bceLoss
 from model import UNet_3Plus
 import time
 from PIL import Image
@@ -130,7 +132,9 @@ def train(config, train_loader, model, criterion, optimizer):
             iou = iou_score(outputs[-1], target)
         else:
             output = model(input)
-            loss = criterion(output, target)
+            loss = 0
+            for index in range(len(criterion)):
+                  loss += criterion[index](output, target)
             iou = iou_score(output, target)
         # print("target: ",target)
         # print("output: ",output)
@@ -177,7 +181,9 @@ def validate(config, val_loader, model, criterion):
                 iou = iou_score(outputs[-1], target)
             else:
                 output = model(input)
-                loss = criterion(output, target)
+                loss = 0
+                for index in range(len(criterion)):
+                  loss += criterion[index](output, target)
                 iou = iou_score(output, target)
 
             avg_meters['loss'].update(loss.item(), input.size(0))
@@ -218,7 +224,10 @@ def test(config, test_loader, model, criterion, image_saving_dir):
                 iou = iou_score(outputs[-1], target)
             else:
                 output = model(input)
-                loss = criterion(output, target)
+                loss = 0
+                for index in range(len(criterion)):
+                  loss += criterion[index](output, target)
+                
                 iou = iou_score(output, target)
 
             avg_meters['loss'].update(loss.item(), input.size(0))
@@ -282,7 +291,8 @@ def main():
 
     # define loss function (criterion)
     # start with something simple (iou loss)
-    criterion = iouLoss.IOU() # from iouLoss.py
+    criterion = [iouLoss.IOU().to(device), msssimLoss.MSSSIM().to(device),bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
+    # criterion = [iouLoss.IOU().to(device), bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
 
     # original code
     # if config['loss'] == 'BCEWithLogitsLoss':
