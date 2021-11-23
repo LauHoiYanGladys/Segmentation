@@ -486,7 +486,18 @@ def main():
         ('test_loss', []),
         ('test_iou', []),
     ])
-    testing_log = test(config, test_loader, model, criterion, image_saving_dir)
+    # load the best model
+    if config['deep_supervision']:
+      model_test = UNet_3Plus_DeepSup()
+    else:
+      model_test = UNet_3Plus()
+
+    model_path_retrieve = 'models/%s/model.pth' % run_id
+
+    model_test.load_state_dict(torch.load(model_path_retrieve))
+    model_test = model_test.to(device)
+
+    testing_log = test(config, test_loader, model_test, criterion, image_saving_dir)
     test_log['test_loss'].append(testing_log['loss'])
     test_log['test_iou'].append(testing_log['iou'])
 
