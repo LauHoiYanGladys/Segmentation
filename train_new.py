@@ -15,43 +15,37 @@ from sklearn.model_selection import train_test_split
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 
-# import archs
-# import losses
+import archs
+import losses
 from dataset import Dataset
 from metrics import iou_score
 from utils import AverageMeter, str2bool
 
-import iouLoss
-import msssimLoss
-import bceLoss
-from model import UNet_3Plus, UNet_3Plus_DeepSup, UNet
 import time
-from PIL import Image
-import numpy as np
+import pickle
 
-# ARCH_NAMES = archs.__all__
-# LOSS_NAMES = losses.__all__
-# LOSS_NAMES.append('BCEWithLogitsLoss')
+ARCH_NAMES = archs.__all__
+LOSS_NAMES = losses.__all__
+LOSS_NAMES.append('BCEWithLogitsLoss')
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Code adopted from https://github.com/4uiiurz1/pytorch-nested-unet/blob/master/train.py
 def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--name', default=None,
                         help='model name: (default: arch+timestamp)')
-    parser.add_argument('--epochs', default=1, type=int, metavar='N',
+    parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-b', '--batch_size', default=16, type=int,
                         metavar='N', help='mini-batch size (default: 16)')
-
+    
     # model
-    # parser.add_argument('--arch', '-a', metavar='ARCH', default='NestedUNet',
-    #                     choices=ARCH_NAMES,
-    #                     help='model architecture: ' +
-    #                     ' | '.join(ARCH_NAMES) +
-    #                     ' (default: NestedUNet)')
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='NestedUNet',
+                        choices=ARCH_NAMES,
+                        help='model architecture: ' +
+                        ' | '.join(ARCH_NAMES) +
+                        ' (default: NestedUNet)')
     parser.add_argument('--deep_supervision', default=False, type=str2bool)
     parser.add_argument('--input_channels', default=3, type=int,
                         help='input channels')
@@ -61,14 +55,14 @@ def parse_args():
                         help='image width')
     parser.add_argument('--input_h', default=96, type=int,
                         help='image height')
-
+    
     # loss
-    # parser.add_argument('--loss', default='BCEDiceLoss',
-    #                     choices=LOSS_NAMES,
-    #                     help='loss: ' +
-    #                     ' | '.join(LOSS_NAMES) +
-    #                     ' (default: BCEDiceLoss)')
-
+    parser.add_argument('--loss', default='BCEDiceLoss',
+                        choices=LOSS_NAMES,
+                        help='loss: ' +
+                        ' | '.join(LOSS_NAMES) +
+                        ' (default: BCEDiceLoss)')
+    
     # dataset
     parser.add_argument('--dataset', default='dsb2018_96',
                         help='dataset name')
@@ -93,7 +87,7 @@ def parse_args():
                         help='nesterov')
 
     # scheduler
-    parser.add_argument('--scheduler', default='ReduceLROnPlateau',
+    parser.add_argument('--scheduler', default='CosineAnnealingLR',
                         choices=['CosineAnnealingLR', 'ReduceLROnPlateau', 'MultiStepLR', 'ConstantLR'])
     parser.add_argument('--min_lr', default=1e-5, type=float,
                         help='minimum learning rate')
@@ -103,7 +97,7 @@ def parse_args():
     parser.add_argument('--gamma', default=2/3, type=float)
     parser.add_argument('--early_stopping', default=-1, type=int,
                         metavar='N', help='early stopping (default: -1)')
-
+    
     parser.add_argument('--num_workers', default=4, type=int)
 
     config = parser.parse_args()
@@ -116,47 +110,57 @@ def train(config, train_loader, model, criterion, optimizer):
                   'iou': AverageMeter()}
 
     model.train()
+    print("Training...")
+    training_loss = 0.0
+    training_iou = 0
 
     pbar = tqdm(total=len(train_loader))
     for input, target, _ in train_loader:
-        input = input.to(device)
-        target = target.to(device)
+        input = input.cuda()
+        target = target.cuda()
+
+        # print("training input: ",input)
+        # print("training target: ",target)
 
         # compute output
         if config['deep_supervision']:
             outputs = model(input)
             loss = 0
             for output in outputs:
-              for index in range(len(criterion)):
-                loss += criterion[index](output, target)
+                loss += criterion(output, target)
             loss /= len(outputs)
             iou = iou_score(outputs[-1], target)
         else:
             output = model(input)
-            loss = 0
-            for index in range(len(criterion)):
-                  loss += criterion[index](torch.squeeze(output), torch.squeeze(target))
+            # need to pass output through sigmoid function to use BCE loss correctly :https://towardsdatascience.com/cuda-error-device-side-assert-triggered-c6ae1c8fa4c3
+            loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
             iou = iou_score(output, target)
-        # print("target: ",target)
-        # print("output: ",output)
+
         # compute gradient and do optimizing step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        avg_meters['loss'].update(loss.item(), input.size(0))
-        avg_meters['iou'].update(iou, input.size(0))
+        training_loss += loss.item()
+        training_iou += iou
 
-        postfix = OrderedDict([
-            ('loss', avg_meters['loss'].avg),
-            ('iou', avg_meters['iou'].avg),
-        ])
-        pbar.set_postfix(postfix)
+        # avg_meters['loss'].update(loss.item(), input.size(0))
+        # avg_meters['iou'].update(iou, input.size(0))
+
+        # postfix = OrderedDict([
+        #     ('loss', avg_meters['loss'].avg),
+        #     ('iou', avg_meters['iou'].avg),
+        # ])
+        # pbar.set_postfix(postfix)
         pbar.update(1)
+    num_batch = len(train_loader)
+    training_loss /= num_batch
+    training_iou /= num_batch
     pbar.close()
 
-    return OrderedDict([('loss', avg_meters['loss'].avg),
-                        ('iou', avg_meters['iou'].avg)])
+    return training_loss, training_iou
+    # return OrderedDict([('loss', avg_meters['loss'].avg),
+    #                     ('iou', avg_meters['iou'].avg)])
 
 
 def validate(config, val_loader, model, criterion):
@@ -165,127 +169,64 @@ def validate(config, val_loader, model, criterion):
 
     # switch to evaluate mode
     model.eval()
+    print("Validating...")
+    val_loss = 0.0
+    val_iou = 0
 
     with torch.no_grad():
         pbar = tqdm(total=len(val_loader))
         for input, target, _ in val_loader:
-            input = input.to(device)
-            target = target.to(device)
+            input = input.cuda()
+            target = target.cuda()
+
+            # print("validating input: ",input)
+            # print("validating target: ",target)
 
             # compute output
             if config['deep_supervision']:
                 outputs = model(input)
                 loss = 0
                 for output in outputs:
-                  for index in range(len(criterion)):
-                    loss += criterion[index](output, target)
+                    loss += criterion(output, target)
                 loss /= len(outputs)
                 iou = iou_score(outputs[-1], target)
             else:
                 output = model(input)
-                loss = 0
-                for index in range(len(criterion)):
-                  loss += criterion[index](torch.squeeze(output), torch.squeeze(target))
+                loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
                 iou = iou_score(output, target)
 
-            avg_meters['loss'].update(loss.item(), input.size(0))
-            avg_meters['iou'].update(iou, input.size(0))
+            # avg_meters['loss'].update(loss.item(), input.size(0))
+            # avg_meters['iou'].update(iou, input.size(0))
 
-            postfix = OrderedDict([
-                ('loss', avg_meters['loss'].avg),
-                ('iou', avg_meters['iou'].avg),
-            ])
-            pbar.set_postfix(postfix)
+            # postfix = OrderedDict([
+            #     ('loss', avg_meters['loss'].avg),
+            #     ('iou', avg_meters['iou'].avg),
+            # ])
+            # pbar.set_postfix(postfix)
+
+            val_loss += loss.item()
+            val_iou += iou
             pbar.update(1)
+            
+        num_batch = len(val_loader)
+        val_loss /= num_batch
+        val_iou /= num_batch
         pbar.close()
 
-    return OrderedDict([('loss', avg_meters['loss'].avg),
-                        ('iou', avg_meters['iou'].avg)])
-
-
-def test(config, test_loader, model, criterion, image_saving_dir):
-    avg_meters = {'loss': AverageMeter(),
-                  'iou': AverageMeter()}
-
-    # switch to evaluate mode
-    model.eval()
-
-    with torch.no_grad():
-        pbar = tqdm(total=len(test_loader))
-        for batch, (input, target, _) in enumerate(test_loader):
-            input = input.to(device)
-            target = target.to(device)
-
-            # compute output
-            if config['deep_supervision']:
-                outputs = model(input)
-                loss = 0
-                for output in outputs:
-                  for index in range(len(criterion)):
-                    loss += criterion[index](output, target)
-                loss /= len(outputs)
-                iou = iou_score(outputs[-1], target)
-            else:
-                output = model(input)
-                loss = 0
-                for index in range(len(criterion)):
-                  loss += criterion[index](torch.squeeze(output), torch.squeeze(target))
-                
-                iou = iou_score(output, target)
-
-            avg_meters['loss'].update(loss.item(), input.size(0))
-            avg_meters['iou'].update(iou, input.size(0))
-
-            # use model to generate segmentation image results
-      
-            # create the folder for saving output images and psnr result
-            image_save_folder = image_saving_dir
-            if not os.path.exists(image_save_folder):
-              os.makedirs(image_save_folder)
-
-            # print("output.shape: ",output.shape)
-            # print("target.shape: ",target.shape)
-
-            # saves the images and image paths to one same folder if necessary
-            if config['deep_supervision']:
-              # outputs[0] is the output from the last decoder layer
-              # outputs[0] = torch.tensor(torch.sigmoid(outputs[0]) > 0.5,dtype=torch.float32, requires_grad=True)
-              output = Image.fromarray((torch.squeeze(torch.sigmoid(outputs[0])).cpu().detach().numpy()*255).astype(np.uint8))
-            else:
-              # output = torch.tensor(torch.sigmoid(output) > 0.5,dtype=torch.float32, requires_grad=True)
-              output = Image.fromarray((torch.squeeze(torch.sigmoid(output)).cpu().detach().numpy()*255).astype(np.uint8))
-            target = Image.fromarray((torch.squeeze(target).cpu().detach().numpy()*255).astype(np.uint8))
-
-            data_str = os.path.join(image_save_folder,str(batch) +'_'+'result.TIF')
-            label_str = os.path.join(image_save_folder,str(batch) +'_'+ 'original.TIF')
-
-            target.save(label_str, 'TIFF')
-            output.save(data_str, 'TIFF')
-
-            postfix = OrderedDict([
-                ('loss', avg_meters['loss'].avg),
-                ('iou', avg_meters['iou'].avg),
-            ])
-            pbar.set_postfix(postfix)
-            pbar.update(1)
-
-        pbar.close()
-
-    return OrderedDict([('loss', avg_meters['loss'].avg),
-                        ('iou', avg_meters['iou'].avg)])
+    return val_loss, val_iou
+    # return OrderedDict([('loss', avg_meters['loss'].avg),
+    #                     ('iou', avg_meters['iou'].avg)])
 
 
 def main():
-    run_id = str(int(time.time()))
     config = vars(parse_args())
-    image_saving_dir = os.path.join('outs',run_id)
+    run_id = str(int(time.time()))
 
     # if config['name'] is None:
-    #   if config['deep_supervision']:
-    #       config['name'] = '%s_%s_wDS' % (config['dataset'], 'unet3plus')
-    #   else:
-    #       config['name'] = '%s_%s_woDS' % (config['dataset'], 'unet3plus')
-
+    #     if config['deep_supervision']:
+    #         config['name'] = '%s_%s_wDS' % (config['dataset'], config['arch'])
+    #     else:
+    #         config['name'] = '%s_%s_woDS' % (config['dataset'], config['arch'])
     # os.makedirs('models/%s' % config['name'], exist_ok=True)
     os.makedirs('models/%s' % run_id)
 
@@ -294,18 +235,12 @@ def main():
         print('%s: %s' % (key, config[key]))
     print('-' * 20)
 
-    # with open('models/%s/config.yml' % config['name'], 'w') as f:
     with open('models/%s/config.yml' % run_id, 'w') as f:
         yaml.dump(config, f)
 
     # define loss function (criterion)
-    # start with something simple (iou loss)
-    #criterion = [iouLoss.IOU().to(device), msssimLoss.MSSSIM().to(device),bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
-    #criterion = [iouLoss.IOU().to(device), bceLoss.WeightedFocalLoss().to(device)] # from iouLoss.py, msssimLoss.py
-    # criterion = [iouLoss.IOU().to(device)]
-    criterion = [nn.BCEWithLogitsLoss().to(device)]
-
-    # original code
+    criterion = torch.nn.BCELoss()
+    # criterion = nn.MSELoss()
     # if config['loss'] == 'BCEWithLogitsLoss':
     #     criterion = nn.BCEWithLogitsLoss().cuda()
     # else:
@@ -314,20 +249,13 @@ def main():
     cudnn.benchmark = True
 
     # create model
-    if config['deep_supervision']:
-      model = UNet_3Plus_DeepSup()
-    else:
-      # model = UNet_3Plus()
-      model = UNet(num_classes=config['num_classes'])
-
-    model = model.to(device)
-    # original code
-    # print("=> creating model %s" % config['arch'])
+    print("=> creating model %s" % config['arch'])
+    model = archs.__dict__[config['arch']](config['num_classes'])
     # model = archs.__dict__[config['arch']](config['num_classes'],
     #                                        config['input_channels'],
     #                                        config['deep_supervision'])
 
-    # model = model.cuda()
+    model = model.to(device)
 
     params = filter(lambda p: p.requires_grad, model.parameters())
     if config['optimizer'] == 'Adam':
@@ -360,31 +288,46 @@ def main():
     # train, val, test in 70%, 15%, 15%
     temp_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.15, random_state=41)
     train_img_ids, test_img_ids = train_test_split(temp_img_ids, test_size=0.176, random_state=41)
-    
-    # print("len(val_img_ids): ",len(val_img_ids))
-    # print("len(train_img_ids): ",len(train_img_ids))
-    # print("len(test_img_ids): ",len(test_img_ids))
+
+    # img_ids = glob(os.path.join('inputs', config['dataset'], 'images', '*' + config['img_ext']))
+    # img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
+
+    # train_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.2, random_state=41)
+
+    # train_transform = Compose([
+    #     transforms.RandomRotate90(),
+    #     transforms.Flip(),
+    #     OneOf([
+    #         transforms.HueSaturationValue(),
+    #         transforms.RandomBrightness(),
+    #         transforms.RandomContrast(),
+    #     ], p=1),
+    #     transforms.Resize(config['input_h'], config['input_w']),
+    #     transforms.Normalize(),
+    # ])
+
+    # val_transform = Compose([
+    #     transforms.Resize(config['input_h'], config['input_w']),
+    #     transforms.Normalize(),
+    # ])
+
+    # test_transform = Compose([
+    #     transforms.Resize(config['input_h'], config['input_w']),
+    #     transforms.Normalize(),
+    # ])
 
     train_transform = Compose([
         transforms.RandomRotate90(),
         transforms.Flip(),
-        OneOf([
-            transforms.HueSaturationValue(),
-            transforms.RandomBrightness(),
-            transforms.RandomContrast(),
-        ], p=1),
         transforms.Resize(config['input_h'], config['input_w']),
-        transforms.Normalize(),
     ])
 
     val_transform = Compose([
         transforms.Resize(config['input_h'], config['input_w']),
-        transforms.Normalize(),
     ])
 
     test_transform = Compose([
         transforms.Resize(config['input_h'], config['input_w']),
-        transforms.Normalize(),
     ])
 
     train_dataset = Dataset(
@@ -395,7 +338,6 @@ def main():
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         transform=train_transform)
-
     val_dataset = Dataset(
         img_ids=val_img_ids,
         img_dir=os.path.join('Dataset', config['dataset'], 'images'),
@@ -404,7 +346,6 @@ def main():
         mask_ext=config['mask_ext'],
         num_classes=config['num_classes'],
         transform=val_transform)
-
     test_dataset = Dataset(
         img_ids=test_img_ids,
         img_dir=os.path.join('Dataset', config['dataset'], 'images'),
@@ -442,40 +383,52 @@ def main():
         ('val_iou', []),
     ])
 
+    for batch, (input, target, _) in enumerate(train_loader):
+      print('train_loader:')
+      print("input: ",input[0])
+      print("target: ",target[0])
+      break
+    
+    for batch, (input, target, _) in enumerate(val_loader):
+      print('val_loader:')
+      print("input: ",input[0])
+      print("target: ",target[0])
+      break
+
     best_iou = 0
     trigger = 0
     for epoch in range(config['epochs']):
         print('Epoch [%d/%d]' % (epoch, config['epochs']))
 
         # train for one epoch
-        train_log = train(config, train_loader, model, criterion, optimizer)
+        training_loss, training_iou = train(config, train_loader, model, criterion, optimizer)
         # evaluate on validation set
-        val_log = validate(config, val_loader, model, criterion)
+        val_loss, val_iou = validate(config, val_loader, model, criterion)
 
         if config['scheduler'] == 'CosineAnnealingLR':
             scheduler.step()
         elif config['scheduler'] == 'ReduceLROnPlateau':
-            scheduler.step(val_log['loss'])
+            scheduler.step(val_loss)
 
         print('loss %.4f - iou %.4f - val_loss %.4f - val_iou %.4f'
-              % (train_log['loss'], train_log['iou'], val_log['loss'], val_log['iou']))
+              % (training_loss, training_iou, val_loss, val_iou))
 
         log['epoch'].append(epoch)
         log['lr'].append(config['lr'])
-        log['loss'].append(train_log['loss'])
-        log['iou'].append(train_log['iou'])
-        log['val_loss'].append(val_log['loss'])
-        log['val_iou'].append(val_log['iou'])
+        log['loss'].append(training_loss)
+        log['iou'].append(training_iou)
+        log['val_loss'].append(val_loss)
+        log['val_iou'].append(val_iou)
 
         pd.DataFrame(log).to_csv('models/%s/log.csv' %
                                  run_id, index=False)
 
         trigger += 1
 
-        if val_log['iou'] > best_iou:
+        if val_iou > best_iou:
             torch.save(model.state_dict(), 'models/%s/model.pth' %
                        run_id)
-            best_iou = val_log['iou']
+            best_iou = val_iou
             print("=> saved best model")
             trigger = 0
 
@@ -483,35 +436,20 @@ def main():
         if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
             print("=> early stopping")
             break
-        
+
         torch.cuda.empty_cache()
 
-    # testing
-    test_log = OrderedDict([
-        ('test_loss', []),
-        ('test_iou', []),
-    ])
-    # load the best model
-    if config['deep_supervision']:
-      model_test = UNet_3Plus_DeepSup()
-    else:
-      # model_test = UNet_3Plus(n_classes=config['num_classes'])
-      model_test = UNet(num_classes=config['num_classes'])
+    # save dataloaders to file for use in testing script
+    # Open a file and use dump()
+    var_save_dir = 'variables'
+    var_name = 'test_loader_'+str(run_id)+'.pkl'
+    path = os.path.join(var_save_dir, var_name)
+    if not os.path.exists(var_save_dir):
+      os.makedirs(var_save_dir)
+    with open(path, 'wb') as file:
+      # A new file will be created
+      pickle.dump(test_loader, file)
 
-    model_path_retrieve = 'models/%s/model.pth' % run_id
-
-    model_test.load_state_dict(torch.load(model_path_retrieve))
-    model_test = model_test.to(device)
-
-    testing_log = test(config, test_loader, model_test, criterion, image_saving_dir)
-    test_log['test_loss'].append(testing_log['loss'])
-    test_log['test_iou'].append(testing_log['iou'])
-
-    pd.DataFrame(test_log).to_csv('models/%s/test_log.csv' %
-                                 run_id, index=False)
-
-    torch.cuda.empty_cache()
-    
 
 if __name__ == '__main__':
     main()

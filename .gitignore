@@ -5,3 +5,4 @@ Dataset/*
 models/*
 __pycache__/
 outs/
+variables/*
