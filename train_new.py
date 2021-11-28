@@ -56,12 +56,12 @@ def parse_args():
     parser.add_argument('--input_h', default=96, type=int,
                         help='image height')
     
-    # loss
-    parser.add_argument('--loss', default='BCEDiceLoss',
-                        choices=LOSS_NAMES,
-                        help='loss: ' +
-                        ' | '.join(LOSS_NAMES) +
-                        ' (default: BCEDiceLoss)')
+    # # loss
+    # parser.add_argument('--loss', default='BCEDiceLoss',
+    #                     choices=LOSS_NAMES,
+    #                     help='loss: ' +
+    #                     ' | '.join(LOSS_NAMES) +
+    #                     ' (default: BCEDiceLoss)')
     
     # dataset
     parser.add_argument('--dataset', default='dsb2018_96',
@@ -121,7 +121,7 @@ def train(config, train_loader, model, criterion, optimizer):
 
         # print("training input: ",input)
         # print("training target: ",target)
-
+        batch_iou = 0
         # compute output
         if config['deep_supervision']:
             outputs = model(input)
@@ -132,17 +132,23 @@ def train(config, train_loader, model, criterion, optimizer):
             iou = iou_score(outputs[-1], target)
         else:
             output = model(input)
+            # print("output.shape: ",output.shape)
+            # print("target.shape: ",target.shape)
+            batch_size = target.shape[0]
+            # print("batch_size: ",batch_size)
             # need to pass output through sigmoid function to use BCE loss correctly :https://towardsdatascience.com/cuda-error-device-side-assert-triggered-c6ae1c8fa4c3
             loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
-            iou = iou_score(output, target)
-
+            
+            for index in range(batch_size):
+              batch_iou += iou_score(torch.squeeze(output[index,:,:]), torch.squeeze(target[index,:,:]))
+            batch_iou /= batch_size
         # compute gradient and do optimizing step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         training_loss += loss.item()
-        training_iou += iou
+        training_iou += batch_iou
 
         # avg_meters['loss'].update(loss.item(), input.size(0))
         # avg_meters['iou'].update(iou, input.size(0))
@@ -181,7 +187,7 @@ def validate(config, val_loader, model, criterion):
 
             # print("validating input: ",input)
             # print("validating target: ",target)
-
+            batch_iou = 0
             # compute output
             if config['deep_supervision']:
                 outputs = model(input)
@@ -192,8 +198,15 @@ def validate(config, val_loader, model, criterion):
                 iou = iou_score(outputs[-1], target)
             else:
                 output = model(input)
+                # print("output.shape: ",output.shape)
+                # print("target.shape: ",target.shape)
+                batch_size = target.shape[0]
+                # print("batch_size: ",batch_size)
                 loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
-                iou = iou_score(output, target)
+
+                for index in range(batch_size):
+                  batch_iou += iou_score(torch.squeeze(output[index,:,:]), torch.squeeze(target[index,:,:]))
+                batch_iou /= batch_size
 
             # avg_meters['loss'].update(loss.item(), input.size(0))
             # avg_meters['iou'].update(iou, input.size(0))
@@ -205,7 +218,7 @@ def validate(config, val_loader, model, criterion):
             # pbar.set_postfix(postfix)
 
             val_loss += loss.item()
-            val_iou += iou
+            val_iou += batch_iou
             pbar.update(1)
             
         num_batch = len(val_loader)
@@ -383,17 +396,17 @@ def main():
         ('val_iou', []),
     ])
 
-    for batch, (input, target, _) in enumerate(train_loader):
-      print('train_loader:')
-      print("input: ",input[0])
-      print("target: ",target[0])
-      break
+    # for batch, (input, target, _) in enumerate(train_loader):
+    #   print('train_loader:')
+    #   print("input: ",input[0])
+    #   print("target: ",target[0])
+    #   break
     
-    for batch, (input, target, _) in enumerate(val_loader):
-      print('val_loader:')
-      print("input: ",input[0])
-      print("target: ",target[0])
-      break
+    # for batch, (input, target, _) in enumerate(val_loader):
+    #   print('val_loader:')
+    #   print("input: ",input[0])
+    #   print("target: ",target[0])
+    #   break
 
     best_iou = 0
     trigger = 0
@@ -449,6 +462,10 @@ def main():
     with open(path, 'wb') as file:
       # A new file will be created
       pickle.dump(test_loader, file)
+
+    # print("len(train_loader): ",len(train_loader))
+    # print("len(val_loader): ",len(val_loader))
+    # print("len(test_loader): ",len(test_loader))
 
 
 if __name__ == '__main__':

@@ -106,13 +106,17 @@ def main():
             # output = np.squeeze(torch.sigmoid(output).cpu().numpy())
             # print("test output: ",output)
             output = np.squeeze(torch.tensor(torch.sigmoid(output)>0.5).cpu().numpy())
-            target = np.squeeze(target.cpu().numpy())
+            target = np.squeeze(target.cpu().numpy())            
+            input = np.squeeze(input.cpu().numpy()).transpose((1,2,0))
+            # print("input.shape: ",input.shape)
             # print("output.shape: ",output.shape)
 
             cv2.imwrite(os.path.join('outs', args.run_id, 'result_'+str(batch) + '.jpg'),
                         (output * 255).astype('uint8'))
             cv2.imwrite(os.path.join('outs', args.run_id, 'target_'+str(batch) + '.jpg'),
                         (target * 255).astype('uint8'))
+            cv2.imwrite(os.path.join('outs', args.run_id, 'input_'+str(batch) + '.jpg'),
+                        (input * 255).astype('uint8'))
             
             test_loss += loss.item()
             test_iou += iou
