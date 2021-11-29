@@ -25,8 +25,6 @@ import time
 import pickle
 
 ARCH_NAMES = archs.__all__
-LOSS_NAMES = losses.__all__
-LOSS_NAMES.append('BCEWithLogitsLoss')
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -46,7 +44,6 @@ def parse_args():
                         help='model architecture: ' +
                         ' | '.join(ARCH_NAMES) +
                         ' (default: NestedUNet)')
-    parser.add_argument('--deep_supervision', default=False, type=str2bool)
     parser.add_argument('--input_channels', default=3, type=int,
                         help='input channels')
     parser.add_argument('--num_classes', default=1, type=int,
@@ -55,13 +52,6 @@ def parse_args():
                         help='image width')
     parser.add_argument('--input_h', default=96, type=int,
                         help='image height')
-    
-    # # loss
-    # parser.add_argument('--loss', default='BCEDiceLoss',
-    #                     choices=LOSS_NAMES,
-    #                     help='loss: ' +
-    #                     ' | '.join(LOSS_NAMES) +
-    #                     ' (default: BCEDiceLoss)')
     
     # dataset
     parser.add_argument('--dataset', default='dsb2018_96',
@@ -116,32 +106,20 @@ def train(config, train_loader, model, criterion, optimizer):
 
     pbar = tqdm(total=len(train_loader))
     for input, target, _ in train_loader:
-        input = input.cuda()
-        target = target.cuda()
+        input = input.to(device)
+        target = target.to(device)
 
-        # print("training input: ",input)
-        # print("training target: ",target)
         batch_iou = 0
+
         # compute output
-        if config['deep_supervision']:
-            outputs = model(input)
-            loss = 0
-            for output in outputs:
-                loss += criterion(output, target)
-            loss /= len(outputs)
-            iou = iou_score(outputs[-1], target)
-        else:
-            output = model(input)
-            # print("output.shape: ",output.shape)
-            # print("target.shape: ",target.shape)
-            batch_size = target.shape[0]
-            # print("batch_size: ",batch_size)
-            # need to pass output through sigmoid function to use BCE loss correctly :https://towardsdatascience.com/cuda-error-device-side-assert-triggered-c6ae1c8fa4c3
-            loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
-            
-            for index in range(batch_size):
-              batch_iou += iou_score(torch.squeeze(output[index,:,:]), torch.squeeze(target[index,:,:]))
-            batch_iou /= batch_size
+        output = model(input)
+        batch_size = target.shape[0]
+        # need to pass output through sigmoid function to use BCE loss correctly :https://towardsdatascience.com/cuda-error-device-side-assert-triggered-c6ae1c8fa4c3
+        loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
+        
+        for index in range(batch_size):
+          batch_iou += iou_score(torch.squeeze(output[index,:,:]), torch.squeeze(target[index,:,:]))
+        batch_iou /= batch_size
         # compute gradient and do optimizing step
         optimizer.zero_grad()
         loss.backward()
@@ -150,14 +128,6 @@ def train(config, train_loader, model, criterion, optimizer):
         training_loss += loss.item()
         training_iou += batch_iou
 
-        # avg_meters['loss'].update(loss.item(), input.size(0))
-        # avg_meters['iou'].update(iou, input.size(0))
-
-        # postfix = OrderedDict([
-        #     ('loss', avg_meters['loss'].avg),
-        #     ('iou', avg_meters['iou'].avg),
-        # ])
-        # pbar.set_postfix(postfix)
         pbar.update(1)
     num_batch = len(train_loader)
     training_loss /= num_batch
@@ -165,8 +135,6 @@ def train(config, train_loader, model, criterion, optimizer):
     pbar.close()
 
     return training_loss, training_iou
-    # return OrderedDict([('loss', avg_meters['loss'].avg),
-    #                     ('iou', avg_meters['iou'].avg)])
 
 
 def validate(config, val_loader, model, criterion):
@@ -185,37 +153,15 @@ def validate(config, val_loader, model, criterion):
             input = input.cuda()
             target = target.cuda()
 
-            # print("validating input: ",input)
-            # print("validating target: ",target)
             batch_iou = 0
             # compute output
-            if config['deep_supervision']:
-                outputs = model(input)
-                loss = 0
-                for output in outputs:
-                    loss += criterion(output, target)
-                loss /= len(outputs)
-                iou = iou_score(outputs[-1], target)
-            else:
-                output = model(input)
-                # print("output.shape: ",output.shape)
-                # print("target.shape: ",target.shape)
-                batch_size = target.shape[0]
-                # print("batch_size: ",batch_size)
-                loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
+            output = model(input)
+            batch_size = target.shape[0]
+            loss = criterion(torch.sigmoid(torch.squeeze(output)), target)
 
-                for index in range(batch_size):
-                  batch_iou += iou_score(torch.squeeze(output[index,:,:]), torch.squeeze(target[index,:,:]))
-                batch_iou /= batch_size
-
-            # avg_meters['loss'].update(loss.item(), input.size(0))
-            # avg_meters['iou'].update(iou, input.size(0))
-
-            # postfix = OrderedDict([
-            #     ('loss', avg_meters['loss'].avg),
-            #     ('iou', avg_meters['iou'].avg),
-            # ])
-            # pbar.set_postfix(postfix)
+            for index in range(batch_size):
+              batch_iou += iou_score(torch.squeeze(output[index,:,:]), torch.squeeze(target[index,:,:]))
+            batch_iou /= batch_size
 
             val_loss += loss.item()
             val_iou += batch_iou
@@ -227,20 +173,12 @@ def validate(config, val_loader, model, criterion):
         pbar.close()
 
     return val_loss, val_iou
-    # return OrderedDict([('loss', avg_meters['loss'].avg),
-    #                     ('iou', avg_meters['iou'].avg)])
 
 
 def main():
     config = vars(parse_args())
     run_id = str(int(time.time()))
 
-    # if config['name'] is None:
-    #     if config['deep_supervision']:
-    #         config['name'] = '%s_%s_wDS' % (config['dataset'], config['arch'])
-    #     else:
-    #         config['name'] = '%s_%s_woDS' % (config['dataset'], config['arch'])
-    # os.makedirs('models/%s' % config['name'], exist_ok=True)
     os.makedirs('models/%s' % run_id)
 
     print('-' * 20)
@@ -253,20 +191,12 @@ def main():
 
     # define loss function (criterion)
     criterion = torch.nn.BCELoss()
-    # criterion = nn.MSELoss()
-    # if config['loss'] == 'BCEWithLogitsLoss':
-    #     criterion = nn.BCEWithLogitsLoss().cuda()
-    # else:
-    #     criterion = losses.__dict__[config['loss']]().cuda()
 
     cudnn.benchmark = True
 
     # create model
     print("=> creating model %s" % config['arch'])
     model = archs.__dict__[config['arch']](config['num_classes'])
-    # model = archs.__dict__[config['arch']](config['num_classes'],
-    #                                        config['input_channels'],
-    #                                        config['deep_supervision'])
 
     model = model.to(device)
 
@@ -295,39 +225,11 @@ def main():
 
     # Data loading code
     img_ids = glob(os.path.join('Dataset', config['dataset'], 'images', '*' + config['img_ext']))
-    # print('img_ids: ',img_ids)
     img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
     
     # train, val, test in 70%, 15%, 15%
     temp_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.15, random_state=41)
     train_img_ids, test_img_ids = train_test_split(temp_img_ids, test_size=0.176, random_state=41)
-
-    # img_ids = glob(os.path.join('inputs', config['dataset'], 'images', '*' + config['img_ext']))
-    # img_ids = [os.path.splitext(os.path.basename(p))[0] for p in img_ids]
-
-    # train_img_ids, val_img_ids = train_test_split(img_ids, test_size=0.2, random_state=41)
-
-    # train_transform = Compose([
-    #     transforms.RandomRotate90(),
-    #     transforms.Flip(),
-    #     OneOf([
-    #         transforms.HueSaturationValue(),
-    #         transforms.RandomBrightness(),
-    #         transforms.RandomContrast(),
-    #     ], p=1),
-    #     transforms.Resize(config['input_h'], config['input_w']),
-    #     transforms.Normalize(),
-    # ])
-
-    # val_transform = Compose([
-    #     transforms.Resize(config['input_h'], config['input_w']),
-    #     transforms.Normalize(),
-    # ])
-
-    # test_transform = Compose([
-    #     transforms.Resize(config['input_h'], config['input_w']),
-    #     transforms.Normalize(),
-    # ])
 
     train_transform = Compose([
         transforms.RandomRotate90(),
@@ -396,18 +298,6 @@ def main():
         ('val_iou', []),
     ])
 
-    # for batch, (input, target, _) in enumerate(train_loader):
-    #   print('train_loader:')
-    #   print("input: ",input[0])
-    #   print("target: ",target[0])
-    #   break
-    
-    # for batch, (input, target, _) in enumerate(val_loader):
-    #   print('val_loader:')
-    #   print("input: ",input[0])
-    #   print("target: ",target[0])
-    #   break
-
     best_iou = 0
     trigger = 0
     for epoch in range(config['epochs']):
@@ -462,10 +352,6 @@ def main():
     with open(path, 'wb') as file:
       # A new file will be created
       pickle.dump(test_loader, file)
-
-    # print("len(train_loader): ",len(train_loader))
-    # print("len(val_loader): ",len(val_loader))
-    # print("len(test_loader): ",len(test_loader))
 
 
 if __name__ == '__main__':
