@@ -1,4 +1,7 @@
-# Segmentation
+# Image Segmentation by UNet
+
+In this work, we used UNet to perform image segmentation on the 2018 Data Science Bowl cell nuclei dataset.
+
 ## Preprocessing
 * Download data from Kaggle (https://www.kaggle.com/c/data-science-bowl-2018/data) using the Kaggle API
 * Unzip `stage1_train.zip` and extract to `Dataset/stage1_train`. We will be splitting this training set into train, validation and testing subsets in the training script `train.py`.
@@ -14,7 +17,12 @@
 * Run `python val.py --run_id (insert run_id)`
 
 ## Results
-Result images can be found here: https://drive.google.com/drive/folders/11cL1fjtuW6iQce9gMpDM8QV78wQB92dh?usp=sharing
+
+Complete result images can be found here: https://drive.google.com/drive/folders/11cL1fjtuW6iQce9gMpDM8QV78wQB92dh?usp=sharing
+
+Selected result masks:
+
+![image](https://drive.google.com/uc?export=view&id=1_JStPhnp1PtufPpdSvlFwZlqribpd-IQ)
 
 IOU metrics:
 * Train IOU: 0.7245
