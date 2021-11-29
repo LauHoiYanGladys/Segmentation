@@ -1,6 +1,8 @@
 # Image Segmentation by UNet
 
-In this work, we used UNet to perform image segmentation on the 2018 Data Science Bowl cell nuclei dataset.
+In this work, we used UNet to perform image segmentation on the 2018 Data Science Bowl cell nuclei dataset. 
+
+The code was adopted from this GitHub repository: https://github.com/4uiiurz1/pytorch-nested-unet
 
 ## Preprocessing
 * Download data from Kaggle (https://www.kaggle.com/c/data-science-bowl-2018/data) using the Kaggle API
